@@ -247,6 +247,20 @@
   .empty-state-icon { font-size: 36px; margin-bottom: 10px; }
   .empty-state h3 { color: var(--text); margin: 0 0 6px; font-size: 16px; }
   .empty-state p { font-size: 13px; margin: 0; line-height: 1.5; }
+
+  /* Settings view */
+  .settings-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px; margin-bottom: 14px;
+  }
+  .settings-card h3 { margin: 0 0 8px; font-size: 15px; }
+  .settings-copy { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin: 0 0 14px; }
+  .settings-card a { color: var(--accent); }
+  .supporter-active-badge {
+    display: inline-block; background: var(--accent); color: var(--on-accent);
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 4px 10px; border-radius: 999px;
+  }
 </style>
 </head>
 <body>
@@ -260,6 +274,7 @@
   <button class="tab-btn active" data-tab="scan">Scan</button>
   <button class="tab-btn" data-tab="create">Create</button>
   <button class="tab-btn" data-tab="history">History</button>
+  <button class="tab-btn" data-tab="settings">Settings</button>
 </nav>
 
 <main>
@@ -348,6 +363,35 @@
     </div>
     <div id="history-list"></div>
   </section>
+
+  <section id="settings-view" hidden>
+    <div class="settings-card">
+      <h3 id="supporter-heading">Go Supporter</h3>
+      <p id="supporter-body" class="settings-copy">
+        A one-time purchase that removes the single banner ad, permanently. No subscription, ever —
+        same as everything else in this pipeline.
+      </p>
+      <button id="supporter-btn" class="primary-btn">Upgrade — $2.99 one-time</button>
+      <p id="supporter-note" class="field-hint">
+        Doesn't charge anything yet — real purchases turn on once this ships to the Play Store
+        and gets wired to native billing (Session 6+). For now this just previews the ad-free view
+        so we can confirm it looks right before that's real.
+      </p>
+    </div>
+
+    <div class="settings-card">
+      <h3>Privacy</h3>
+      <p class="settings-copy">
+        Scan history and generated codes stay on this device. Nothing is uploaded, tracked, or
+        sent to a server — there isn't one. Full policy: <a id="privacy-link" href="privacy.html" target="_blank" rel="noopener">privacy.html</a>.
+      </p>
+    </div>
+
+    <div class="settings-card">
+      <h3>About</h3>
+      <p class="settings-copy">ScanVault — your result. Nothing else.</p>
+    </div>
+  </section>
 </main>
 
 <div id="ad-slot" class="ad-slot" aria-hidden="true">Ad space — reserved for Session 5</div>
@@ -396,10 +440,11 @@
     await preloadStorage(Object.values(CONFIG.SK)); // must happen before any LocalStore.getItem()
     S.data = await loadData();
     renderSingleFormFields('url');
+    updateAdSlotVisibility();
   }
 
   function showView(name) {
-    ['scan', 'create', 'history', 'result'].forEach((v) => {
+    ['scan', 'create', 'history', 'settings', 'result'].forEach((v) => {
       document.getElementById(`${v}-view`).hidden = v !== name;
     });
     if (name !== 'result') {
@@ -408,6 +453,10 @@
         btn.classList.toggle('active', btn.dataset.tab === name);
       });
     }
+  }
+
+  function updateAdSlotVisibility() {
+    document.getElementById('ad-slot').hidden = Boolean(S.data.settings.isSupporter);
   }
 
   function escapeHtml(str) {
@@ -715,8 +764,38 @@
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
       if (tab === 'history') renderHistoryView();
+      if (tab === 'settings') renderSettingsView();
       showView(tab);
     });
+  });
+
+  // ---------- Settings view ----------
+
+  function renderSettingsView() {
+    const isSupporter = Boolean(S.data.settings.isSupporter);
+    const heading = document.getElementById('supporter-heading');
+    const body = document.getElementById('supporter-body');
+    const btn = document.getElementById('supporter-btn');
+    const note = document.getElementById('supporter-note');
+
+    if (isSupporter) {
+      heading.innerHTML = 'Supporter <span class="supporter-active-badge">Active</span>';
+      body.textContent = "Thanks for the support — the ad is gone, for good, on this device.";
+      btn.textContent = 'Remove Supporter (testing only)';
+      note.textContent = 'This toggle is local-only testing infrastructure — it does not exist in this form once real billing is wired in.';
+    } else {
+      heading.textContent = 'Go Supporter';
+      body.textContent = 'A one-time purchase that removes the single banner ad, permanently. No subscription, ever — same as everything else in this pipeline.';
+      btn.textContent = 'Upgrade — $2.99 one-time';
+      note.textContent = "Doesn't charge anything yet — real purchases turn on once this ships to the Play Store and gets wired to native billing (Session 6+). For now this just previews the ad-free view so we can confirm it looks right before that's real.";
+    }
+  }
+
+  document.getElementById('supporter-btn').addEventListener('click', () => {
+    S.data = { ...S.data, settings: { ...S.data.settings, isSupporter: !S.data.settings.isSupporter } };
+    persistData();
+    updateAdSlotVisibility();
+    renderSettingsView();
   });
 
   // ---------- History view ----------
