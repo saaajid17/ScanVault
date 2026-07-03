@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>ScanVault</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="scan-parser.js"></script>
+<script src="scanvault-data.js"></script>
+<script src="localstore.js"></script>
 <style>
   :root {
     --bg: #0e1013;
@@ -35,7 +38,18 @@
   header p { margin: 4px 0 0; font-size: 13px; color: var(--text-dim); }
   main { padding: 16px; padding-bottom: 60px; max-width: 480px; margin: 0 auto; }
 
-  #scan-view, #result-view { display: block; }
+  .tab-bar {
+    display: flex; max-width: 480px; margin: 0 auto;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    flex: 1; background: transparent; border: none; color: var(--text-dim);
+    padding: 12px 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  #scan-view, #result-view, #create-view, #history-view { display: block; }
   [hidden] { display: none !important; }
 
   .viewfinder-wrap {
@@ -75,6 +89,9 @@
   }
   .primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+  button { transition: transform 0.08s ease-out; }
+  button:active:not(:disabled) { transform: scale(0.97); }
+
   .privacy-note { font-size: 12px; color: var(--text-dim); text-align: center; margin: 10px 0 0; line-height: 1.4; }
 
   .error-banner {
@@ -99,13 +116,33 @@
     padding: 10px; border: 1px dashed var(--border); border-radius: 10px; cursor: pointer;
   }
 
+  @keyframes resultPop {
+    from { opacity: 0; transform: scale(0.97) translateY(4px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
   .result-card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+    animation: resultPop 0.2s ease-out;
   }
   .result-type-label {
     font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
     color: var(--accent); font-weight: 700; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  @keyframes checkPop {
+    0% { opacity: 0; transform: scale(0.4); }
+    20% { opacity: 1; transform: scale(1.2); }
+    40% { transform: scale(1); }
+    75% { opacity: 1; }
+    100% { opacity: 0; transform: scale(1); }
+  }
+  .success-check {
+    display: none; color: var(--accent); font-size: 13px;
+  }
+  .success-check.show {
+    display: inline-block;
+    animation: checkPop 1.4s ease-out forwards;
   }
   .result-content {
     font-size: 20px; font-weight: 600; line-height: 1.4;
@@ -144,6 +181,72 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim);
   }
+
+  /* Create view */
+  .mode-toggle, .type-selector {
+    display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap;
+  }
+  .mode-btn, .type-btn {
+    background: var(--surface); color: var(--text-dim); border: 1px solid var(--border);
+    padding: 9px 14px; border-radius: 999px; font-size: 13px; cursor: pointer;
+  }
+  .mode-btn.active, .type-btn.active {
+    background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 700;
+  }
+  #single-form-fields, #batch-generate-panel { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  #single-form-fields input, #single-form-fields textarea, #single-form-fields select,
+  #batch-input {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: 10px; padding: 12px 14px; font-size: 15px; width: 100%; font-family: inherit;
+  }
+  #batch-input { resize: vertical; }
+  .field-hint { font-size: 12px; color: var(--text-dim); margin: -4px 0 0; }
+  .generate-output {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; text-align: center; margin-top: 16px;
+    animation: resultPop 0.2s ease-out;
+  }
+  .generate-output canvas { background: #fff; padding: 10px; border-radius: 8px; }
+  .output-actions { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
+
+  .print-sheet {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 14px; margin-top: 16px;
+  }
+  .print-cell {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px; text-align: center;
+  }
+  .print-cell canvas { background: #fff; padding: 6px; border-radius: 6px; max-width: 100%; height: auto; }
+  .print-caption { font-size: 11px; color: var(--text-dim); margin-top: 6px; word-break: break-word; }
+
+  @media print {
+    body * { visibility: hidden; }
+    .print-sheet, .print-sheet *, .generate-output, .generate-output * { visibility: visible; }
+    .print-sheet, .generate-output { position: absolute; top: 0; left: 0; width: 100%; margin: 0; border: none; }
+    .tab-bar, header, .ad-slot, .output-actions, #batch-print-btn, #single-share-btn { display: none !important; }
+  }
+
+  /* History view */
+  .history-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .history-header h2 { margin: 0; font-size: 17px; }
+  .history-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+  }
+  .history-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+  .history-type-badge { font-size: 10px; letter-spacing: 0.08em; color: var(--accent); font-weight: 700; }
+  .history-preview { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history-time { font-size: 11px; color: var(--text-dim); }
+  .history-delete-btn {
+    background: transparent; border: none; color: var(--text-dim); font-size: 16px;
+    cursor: pointer; padding: 4px 8px; flex-shrink: 0;
+  }
+  .empty-state { text-align: center; padding: 50px 20px; color: var(--text-dim); }
+  .empty-state-icon { font-size: 36px; margin-bottom: 10px; }
+  .empty-state h3 { color: var(--text); margin: 0 0 6px; font-size: 16px; }
+  .empty-state p { font-size: 13px; margin: 0; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -152,6 +255,12 @@
   <h1>ScanVault</h1>
   <p>Your result. Nothing else.</p>
 </header>
+
+<nav class="tab-bar">
+  <button class="tab-btn active" data-tab="scan">Scan</button>
+  <button class="tab-btn" data-tab="create">Create</button>
+  <button class="tab-btn" data-tab="history">History</button>
+</nav>
 
 <main>
   <section id="scan-view">
@@ -184,12 +293,60 @@
 
   <section id="result-view" hidden>
     <div class="result-card">
-      <div class="result-type-label"></div>
+      <div class="result-type-label"><span class="type-text"></span><span class="success-check" aria-hidden="true">✓</span></div>
       <div class="result-content"></div>
       <button class="result-primary-action"></button>
       <div class="result-secondary-actions"></div>
     </div>
     <button id="scan-again-btn" class="scan-again-btn">Scan another code</button>
+  </section>
+
+  <section id="create-view" hidden>
+    <div class="mode-toggle">
+      <button class="mode-btn active" data-mode="single">Single Code</button>
+      <button class="mode-btn" data-mode="batch">Batch</button>
+    </div>
+
+    <div id="single-generate-panel">
+      <div class="type-selector" id="single-type-selector">
+        <button class="type-btn active" data-type="url">Link</button>
+        <button class="type-btn" data-type="text">Text</button>
+        <button class="type-btn" data-type="wifi">Wi-Fi</button>
+        <button class="type-btn" data-type="contact">Contact</button>
+        <button class="type-btn" data-type="tel">Phone</button>
+      </div>
+      <div id="single-form-fields"></div>
+      <button id="single-generate-btn" class="primary-btn">Generate</button>
+      <div id="single-output" class="generate-output" hidden>
+        <div id="single-qr-canvas"></div>
+        <button id="single-share-btn" class="primary-btn" style="margin-top:16px;">Share / Save to Photos</button>
+        <div class="output-actions">
+          <button id="single-download-btn" class="secondary-btn">Download PNG</button>
+          <button id="single-print-btn" class="secondary-btn">Print</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="batch-generate-panel" hidden>
+      <div class="type-selector" id="batch-type-selector">
+        <button class="type-btn active" data-type="url">Link</button>
+        <button class="type-btn" data-type="text">Text</button>
+        <button class="type-btn" data-type="tel">Phone</button>
+      </div>
+      <textarea id="batch-input" rows="6" placeholder="One per line. Optional label:&#10;Lavender Lotion | https://shop.example.com/lavender&#10;Rose Serum | https://shop.example.com/rose"></textarea>
+      <p class="field-hint">Wi-Fi and Contact aren't in batch mode — each of those needs several fields per entry, which doesn't fit a one-line list. Use Single Code for those.</p>
+      <button id="batch-generate-btn" class="primary-btn">Generate Sheet</button>
+      <div id="batch-output" class="print-sheet" hidden></div>
+      <button id="batch-print-btn" class="secondary-btn" hidden style="margin-top:14px;">Print Sheet</button>
+    </div>
+  </section>
+
+  <section id="history-view" hidden>
+    <div class="history-header">
+      <h2>History</h2>
+      <button id="clear-history-btn" class="secondary-btn">Clear All</button>
+    </div>
+    <div id="history-list"></div>
   </section>
 </main>
 
@@ -200,16 +357,57 @@
   let scanner = null;
   let lastScannedCode = null;
   let lastScanTime = 0;
-  let sessionScans = []; // in-memory only — Session 3 wires up persisted LocalStore history
+
+  // STATE — persisted data vs ephemeral UI state, kept deliberately separate
+  // per utility-app-architect: S.data survives reloads and needs migration
+  // care, S.ui is thrown away and rebuilt every session.
+  let S = {
+    data: getDefaultData(),
+    ui: { activeTab: 'scan' },
+  };
+  let resultOrigin = 'scan'; // 'scan' | 'history' — where "back" from a result should go
 
   const TYPE_LABELS = {
     url: 'LINK', wifi: 'WI-FI', contact: 'CONTACT', tel: 'PHONE NUMBER',
     email: 'EMAIL', sms: 'TEXT MESSAGE', barcode: 'BARCODE', text: 'TEXT',
   };
 
+  async function persistData() {
+    await LocalStore.setItem(CONFIG.SK.APP_DATA, JSON.stringify(S.data));
+  }
+
+  async function loadData() {
+    const raw = LocalStore.getItem(CONFIG.SK.APP_DATA);
+    if (!raw) return getDefaultData();
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      return getDefaultData(); // corrupted storage — start fresh instead of crashing the app
+    }
+    if (parsed.schema_version !== CURRENT_SCHEMA_VERSION) {
+      parsed = migrateData(parsed.schema_version ?? 0, parsed);
+      await persistData();
+    }
+    return parsed;
+  }
+
+  async function initApp() {
+    await preloadStorage(Object.values(CONFIG.SK)); // must happen before any LocalStore.getItem()
+    S.data = await loadData();
+    renderSingleFormFields('url');
+  }
+
   function showView(name) {
-    document.getElementById('scan-view').hidden = name !== 'scan';
-    document.getElementById('result-view').hidden = name !== 'result';
+    ['scan', 'create', 'history', 'result'].forEach((v) => {
+      document.getElementById(`${v}-view`).hidden = v !== name;
+    });
+    if (name !== 'result') {
+      S.ui.activeTab = name;
+      document.querySelectorAll('.tab-btn').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.tab === name);
+      });
+    }
   }
 
   function escapeHtml(str) {
@@ -284,12 +482,18 @@
 
   function renderResult(parsed) {
     const { type, raw, data } = parsed;
-    const typeLabelEl = document.querySelector('.result-type-label');
+    const typeTextEl = document.querySelector('.result-type-label .type-text');
+    const checkEl = document.querySelector('.result-type-label .success-check');
     const contentEl = document.querySelector('.result-content');
     const primaryBtn = document.querySelector('.result-primary-action');
     const secondaryEl = document.querySelector('.result-secondary-actions');
 
-    typeLabelEl.textContent = TYPE_LABELS[type] || 'TEXT';
+    typeTextEl.textContent = TYPE_LABELS[type] || 'TEXT';
+    checkEl.classList.remove('show');
+    if (resultOrigin === 'scan') {
+      void checkEl.offsetWidth; // force reflow so the animation replays on back-to-back scans of the same type
+      checkEl.classList.add('show');
+    }
     contentEl.innerHTML = '';
     secondaryEl.innerHTML = '';
     primaryBtn.onclick = null;
@@ -362,14 +566,18 @@
       primaryBtn.onclick = (e) => copyToClipboard(data, e.currentTarget);
     }
 
+    const backBtn = document.getElementById('scan-again-btn');
+    backBtn.textContent = resultOrigin === 'history' ? 'Back to History' : 'Scan another code';
+
     showView('result');
   }
 
   function processScan(rawText) {
     if (!rawText || !String(rawText).trim()) return;
     const parsed = parseScanPayload(rawText);
-    sessionScans.unshift({ ...parsed, scannedAt: Date.now() });
-    sessionScans = sessionScans.slice(0, 20);
+    S.data = addScanRecord(S.data, parsed);
+    persistData();
+    resultOrigin = 'scan';
     renderResult(parsed);
   }
 
@@ -450,6 +658,11 @@
   document.getElementById('start-scan-btn').addEventListener('click', startScanner);
 
   document.getElementById('scan-again-btn').addEventListener('click', () => {
+    if (resultOrigin === 'history') {
+      showView('history');
+      renderHistoryView();
+      return;
+    }
     showView('scan');
     document.getElementById('qr-reader').innerHTML = '<div class="viewfinder-placeholder"><span class="icon">▢</span><span>Tap "Start Scanning" below</span></div>';
     document.getElementById('start-scan-btn').hidden = false;
@@ -496,10 +709,271 @@
     }
   });
 
+  // ---------- Tab navigation ----------
+
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      if (tab === 'history') renderHistoryView();
+      showView(tab);
+    });
+  });
+
+  // ---------- History view ----------
+
+  function historyPreviewText(record) {
+    if (record.type === 'wifi') return record.data.ssid || record.raw;
+    if (record.type === 'contact') return record.data.name || record.raw;
+    if (record.type === 'sms') return record.data.number || record.raw;
+    if (record.type === 'email') return record.data.address || record.raw;
+    return typeof record.data === 'string' ? record.data : record.raw;
+  }
+
+  function renderHistoryRow(record) {
+    const preview = historyPreviewText(record);
+    const time = new Date(record.scannedAt).toLocaleString();
+    return `
+      <div class="history-row" data-history-id="${escapeHtml(record.id)}">
+        <div class="history-row-main">
+          <span class="history-type-badge">${TYPE_LABELS[record.type] || 'TEXT'}</span>
+          <span class="history-preview">${escapeHtml(preview)}</span>
+          <span class="history-time">${escapeHtml(time)}</span>
+        </div>
+        <button class="history-delete-btn" data-history-id="${escapeHtml(record.id)}" aria-label="Delete this scan" type="button">✕</button>
+      </div>`;
+  }
+
+  function renderHistoryView() {
+    const container = document.getElementById('history-list');
+    const scans = S.data.scans;
+
+    if (scans.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">🕓</div>
+          <h3>No scans yet</h3>
+          <p>Scan something and it'll show up here. Nothing leaves your phone.</p>
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = scans.map(renderHistoryRow).join('');
+
+    container.querySelectorAll('.history-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        const record = findScanRecord(S.data, row.dataset.historyId);
+        if (!record) return;
+        resultOrigin = 'history';
+        renderResult(record);
+      });
+    });
+    container.querySelectorAll('.history-delete-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation(); // don't also trigger the row's click-to-view handler
+        S.data = removeScanRecord(S.data, btn.dataset.historyId);
+        persistData();
+        renderHistoryView();
+      });
+    });
+  }
+
+  document.getElementById('clear-history-btn').addEventListener('click', () => {
+    if (S.data.scans.length === 0) return;
+    if (!confirm("Clear all scan history? This can't be undone.")) return;
+    S.data = clearScanRecords(S.data);
+    persistData();
+    renderHistoryView();
+  });
+
+  // ---------- Create view: shared QR-rendering helpers ----------
+
+  function renderQrInto(elementId, text, size) {
+    const el = document.getElementById(elementId);
+    el.innerHTML = '';
+    new QRCode(el, { text, width: size, height: size, correctLevel: QRCode.CorrectLevel.M });
+    return el;
+  }
+
+  function getQrDataUrl(elementId) {
+    const el = document.getElementById(elementId);
+    const canvas = el.querySelector('canvas');
+    if (canvas) return canvas.toDataURL('image/png');
+    const img = el.querySelector('img');
+    return img ? img.src : null;
+  }
+
+  function downloadDataUrl(dataUrl, filename) {
+    if (!dataUrl) return;
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  async function shareGeneratedCode(dataUrl, filename, btnEl) {
+    if (!dataUrl) return;
+
+    if (navigator.share && navigator.canShare) {
+      try {
+        const blob = await (await fetch(dataUrl)).blob();
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: 'ScanVault code' });
+          return; // shared successfully — done
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') return; // user closed the share sheet on purpose — don't force a download instead
+        // any other failure (e.g. no share targets registered) — fall through to download below
+      }
+    }
+
+    downloadDataUrl(dataUrl, filename);
+    flashButtonFeedback(btnEl, 'Downloaded');
+  }
+
+  // ---------- Create view: single-code generator ----------
+
+  function renderSingleFormFields(type) {
+    const container = document.getElementById('single-form-fields');
+    if (type === 'url') {
+      container.innerHTML = `<input id="f-url" type="text" placeholder="example.com or https://..." />`;
+    } else if (type === 'text') {
+      container.innerHTML = `<textarea id="f-text" rows="3" placeholder="Any text"></textarea>`;
+    } else if (type === 'wifi') {
+      container.innerHTML = `
+        <input id="f-wifi-ssid" type="text" placeholder="Network name" />
+        <input id="f-wifi-pass" type="text" placeholder="Password (leave blank if open)" />
+        <select id="f-wifi-sec">
+          <option value="WPA">WPA/WPA2</option>
+          <option value="WEP">WEP</option>
+          <option value="nopass">No password</option>
+        </select>`;
+    } else if (type === 'contact') {
+      container.innerHTML = `
+        <input id="f-contact-name" type="text" placeholder="Name" />
+        <input id="f-contact-phone" type="tel" placeholder="Phone" />
+        <input id="f-contact-email" type="email" placeholder="Email" />
+        <input id="f-contact-address" type="text" placeholder="Address (optional)" />`;
+    } else if (type === 'tel') {
+      container.innerHTML = `<input id="f-tel" type="tel" placeholder="+1 555 123 4567" />`;
+    }
+    document.getElementById('single-output').hidden = true;
+  }
+
+  function handleSingleGenerate() {
+    const type = document.querySelector('#single-type-selector .type-btn.active').dataset.type;
+    let payload = '';
+
+    if (type === 'url') {
+      payload = normalizeUrlInput(document.getElementById('f-url').value);
+    } else if (type === 'text') {
+      payload = document.getElementById('f-text').value.trim();
+    } else if (type === 'wifi') {
+      payload = buildWifiString({
+        ssid: document.getElementById('f-wifi-ssid').value,
+        password: document.getElementById('f-wifi-pass').value,
+        security: document.getElementById('f-wifi-sec').value,
+      });
+    } else if (type === 'contact') {
+      payload = buildMecard({
+        name: document.getElementById('f-contact-name').value,
+        phone: document.getElementById('f-contact-phone').value,
+        email: document.getElementById('f-contact-email').value,
+        address: document.getElementById('f-contact-address').value,
+      });
+    } else if (type === 'tel') {
+      const num = document.getElementById('f-tel').value.trim();
+      payload = num ? `tel:${num}` : '';
+    }
+
+    if (!payload) return;
+
+    renderQrInto('single-qr-canvas', payload, 220);
+    document.getElementById('single-output').hidden = false;
+  }
+
+  document.querySelectorAll('#single-type-selector .type-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#single-type-selector .type-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderSingleFormFields(btn.dataset.type);
+    });
+  });
+  document.getElementById('single-generate-btn').addEventListener('click', handleSingleGenerate);
+  document.getElementById('single-share-btn').addEventListener('click', (e) => {
+    shareGeneratedCode(getQrDataUrl('single-qr-canvas'), 'scanvault-code.png', e.currentTarget);
+  });
+  document.getElementById('single-download-btn').addEventListener('click', () => {
+    downloadDataUrl(getQrDataUrl('single-qr-canvas'), 'scanvault-code.png');
+  });
+  document.getElementById('single-print-btn').addEventListener('click', () => window.print());
+
+  // ---------- Create view: batch generator ----------
+
+  function handleBatchGenerate() {
+    const type = document.querySelector('#batch-type-selector .type-btn.active').dataset.type;
+    const entries = parseBatchInput(document.getElementById('batch-input').value);
+    const output = document.getElementById('batch-output');
+    const printBtn = document.getElementById('batch-print-btn');
+
+    output.innerHTML = '';
+    if (entries.length === 0) {
+      output.hidden = true;
+      printBtn.hidden = true;
+      return;
+    }
+
+    entries.forEach((entry, i) => {
+      let payload = entry.value;
+      if (type === 'url') payload = normalizeUrlInput(payload);
+      if (type === 'tel') payload = `tel:${payload}`;
+
+      const cell = document.createElement('div');
+      cell.className = 'print-cell';
+      const qrHolder = document.createElement('div');
+      qrHolder.id = `batch-qr-${i}`;
+      cell.appendChild(qrHolder);
+      const caption = document.createElement('div');
+      caption.className = 'print-caption';
+      caption.textContent = entry.label;
+      cell.appendChild(caption);
+      output.appendChild(cell);
+
+      renderQrInto(`batch-qr-${i}`, payload, 130);
+    });
+
+    output.hidden = false;
+    printBtn.hidden = false;
+  }
+
+  document.querySelectorAll('#batch-type-selector .type-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#batch-type-selector .type-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  document.getElementById('batch-generate-btn').addEventListener('click', handleBatchGenerate);
+  document.getElementById('batch-print-btn').addEventListener('click', () => window.print());
+
+  // ---------- Create view: single vs batch mode toggle ----------
+
+  document.querySelectorAll('.mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.mode-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const mode = btn.dataset.mode;
+      document.getElementById('single-generate-panel').hidden = mode !== 'single';
+      document.getElementById('batch-generate-panel').hidden = mode !== 'batch';
+    });
+  });
+
   window.addEventListener('DOMContentLoaded', () => {
     if (!window.isSecureContext) {
       showCameraError({ message: 'insecure-context' });
     }
+    initApp();
   });
 </script>
 </body>
