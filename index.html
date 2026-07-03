@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>ScanVault</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="scan-parser.js"></script>
+<style>
+  :root {
+    --bg: #0e1013;
+    --surface: #171a1f;
+    --surface-2: #1f232a;
+    --text: #f4f5f7;
+    --text-dim: #8b93a1;
+    --accent: #2dd4a7;
+    --on-accent: #04140f;
+    --border: #262b33;
+    --danger: #ff6b6b;
+    --danger-bg: #2a1717;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  body { padding-bottom: env(safe-area-inset-bottom); }
+  header {
+    padding: calc(16px + env(safe-area-inset-top)) 20px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+  header p { margin: 4px 0 0; font-size: 13px; color: var(--text-dim); }
+  main { padding: 16px; padding-bottom: 60px; max-width: 480px; margin: 0 auto; }
+
+  #scan-view, #result-view { display: block; }
+  [hidden] { display: none !important; }
+
+  .viewfinder-wrap {
+    position: relative;
+    width: 100%; aspect-ratio: 1 / 1;
+    background: #000;
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  #qr-reader { width: 100%; height: 100%; }
+  #qr-reader video, #qr-reader canvas { object-fit: cover; }
+  .viewfinder-placeholder {
+    height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 14px; gap: 8px; text-align: center; padding: 20px;
+  }
+  .viewfinder-placeholder .icon { font-size: 40px; }
+  .scan-region-frame {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none;
+  }
+  .scan-region-frame::before {
+    content: '';
+    width: 62%; height: 62%;
+    border-radius: 12px;
+    box-shadow: 0 0 0 2000px rgba(0,0,0,0.35);
+    border: 2px solid rgba(45,212,167,0.55);
+  }
+
+  .primary-btn {
+    display: block; width: 100%;
+    background: var(--accent); color: var(--on-accent);
+    border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 700;
+    padding: 15px; cursor: pointer;
+  }
+  .primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .privacy-note { font-size: 12px; color: var(--text-dim); text-align: center; margin: 10px 0 0; line-height: 1.4; }
+
+  .error-banner {
+    background: var(--danger-bg); color: var(--danger);
+    border: 1px solid rgba(255,107,107,0.3);
+    border-radius: 10px; padding: 12px 14px; margin-top: 14px;
+    font-size: 13px; line-height: 1.5;
+  }
+
+  .fallback-block { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 18px; }
+  .manual-entry { display: flex; gap: 8px; margin-bottom: 14px; }
+  .manual-entry input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 10px; padding: 12px 14px; font-size: 15px;
+  }
+  .manual-entry button {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0 16px; font-size: 14px; cursor: pointer;
+  }
+  .file-scan-label {
+    display: block; text-align: center; font-size: 14px; color: var(--accent);
+    padding: 10px; border: 1px dashed var(--border); border-radius: 10px; cursor: pointer;
+  }
+
+  .result-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+  }
+  .result-type-label {
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700; margin-bottom: 10px;
+  }
+  .result-content {
+    font-size: 20px; font-weight: 600; line-height: 1.4;
+    word-break: break-word; margin-bottom: 20px;
+  }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 15px; }
+  .kv:last-of-type { border-bottom: none; }
+  .kv span { color: var(--text-dim); flex-shrink: 0; }
+  .kv strong { text-align: right; word-break: break-word; }
+  .hint { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin: 10px 0 0; }
+
+  .result-primary-action {
+    display: block; width: 100%;
+    background: var(--accent); color: var(--on-accent);
+    border: none; font-size: 17px; font-weight: 700;
+    padding: 16px; border-radius: 12px; cursor: pointer;
+  }
+  .result-primary-action:disabled { opacity: 0.5; cursor: not-allowed; }
+  .result-secondary-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .secondary-btn {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    padding: 10px 14px; border-radius: 10px; font-size: 14px; cursor: pointer;
+  }
+  .scan-again-btn {
+    display: block; width: 100%; background: transparent; color: var(--text-dim);
+    border: 1px solid var(--border); border-radius: 12px; padding: 13px; font-size: 14px; cursor: pointer;
+  }
+
+  /* Reserved for Session 5's single banner ad. Deliberately its own fixed strip,
+     outside <main> and never inside .result-card — an ad can never be positioned
+     or styled to look like the scan result. This is the whole differentiation
+     thesis, made structurally impossible to violate by accident later. */
+  .ad-slot {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    height: 40px; background: var(--surface-2); border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ScanVault</h1>
+  <p>Your result. Nothing else.</p>
+</header>
+
+<main>
+  <section id="scan-view">
+    <div class="viewfinder-wrap">
+      <div id="qr-reader">
+        <div class="viewfinder-placeholder">
+          <span class="icon">▢</span>
+          <span>Tap "Start Scanning" below</span>
+        </div>
+      </div>
+      <div class="scan-region-frame" aria-hidden="true"></div>
+    </div>
+
+    <button id="start-scan-btn" class="primary-btn">Start Scanning</button>
+    <p class="privacy-note">We'll ask for camera access to scan codes. Nothing is recorded or sent anywhere — it never leaves your phone.</p>
+
+    <div id="camera-error-banner" class="error-banner" hidden></div>
+
+    <div class="fallback-block">
+      <div class="manual-entry">
+        <input id="manual-code-input" type="text" placeholder="Or type / paste a code" />
+        <button id="manual-lookup-btn">Look Up</button>
+      </div>
+      <label class="file-scan-label" for="file-scan-input">Scan from a photo instead</label>
+      <input type="file" id="file-scan-input" accept="image/*" capture="environment" hidden />
+    </div>
+
+    <div id="qr-reader-file-scratch" hidden></div>
+  </section>
+
+  <section id="result-view" hidden>
+    <div class="result-card">
+      <div class="result-type-label"></div>
+      <div class="result-content"></div>
+      <button class="result-primary-action"></button>
+      <div class="result-secondary-actions"></div>
+    </div>
+    <button id="scan-again-btn" class="scan-again-btn">Scan another code</button>
+  </section>
+</main>
+
+<div id="ad-slot" class="ad-slot" aria-hidden="true">Ad space — reserved for Session 5</div>
+
+<script>
+  const SCAN_COOLDOWN_MS = 2000;
+  let scanner = null;
+  let lastScannedCode = null;
+  let lastScanTime = 0;
+  let sessionScans = []; // in-memory only — Session 3 wires up persisted LocalStore history
+
+  const TYPE_LABELS = {
+    url: 'LINK', wifi: 'WI-FI', contact: 'CONTACT', tel: 'PHONE NUMBER',
+    email: 'EMAIL', sms: 'TEXT MESSAGE', barcode: 'BARCODE', text: 'TEXT',
+  };
+
+  function showView(name) {
+    document.getElementById('scan-view').hidden = name !== 'scan';
+    document.getElementById('result-view').hidden = name !== 'result';
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str == null ? '' : String(str);
+    return div.innerHTML;
+  }
+
+  function vibrateSuccess() {
+    if (navigator.vibrate) navigator.vibrate(80);
+  }
+
+  function playSuccessTone() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.2);
+    } catch (e) { /* audio unavailable — silently skip, never block the scan flow */ }
+  }
+
+  async function copyToClipboard(text, btnEl) {
+    try {
+      await navigator.clipboard.writeText(text || '');
+      flashButtonFeedback(btnEl, 'Copied');
+    } catch (e) {
+      flashButtonFeedback(btnEl, 'Copy failed');
+    }
+  }
+  function flashButtonFeedback(btnEl, label) {
+    if (!btnEl) return;
+    const original = btnEl.textContent;
+    btnEl.textContent = label;
+    setTimeout(() => { btnEl.textContent = original; }, 1200);
+  }
+
+  function addSecondaryAction(container, label, handler) {
+    const btn = document.createElement('button');
+    btn.className = 'secondary-btn';
+    btn.type = 'button';
+    btn.textContent = label;
+    btn.addEventListener('click', handler);
+    container.appendChild(btn);
+  }
+
+  function downloadVCardFile(contact) {
+    const vcard = [
+      'BEGIN:VCARD', 'VERSION:3.0',
+      `FN:${contact.name || 'Unknown'}`,
+      contact.phone ? `TEL:${contact.phone}` : '',
+      contact.email ? `EMAIL:${contact.email}` : '',
+      contact.address ? `ADR:;;${contact.address};;;;` : '',
+      'END:VCARD',
+    ].filter(Boolean).join('\n');
+    const blob = new Blob([vcard], { type: 'text/vcard' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(contact.name || 'contact').replace(/[^a-z0-9]+/gi, '_')}.vcf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function renderResult(parsed) {
+    const { type, raw, data } = parsed;
+    const typeLabelEl = document.querySelector('.result-type-label');
+    const contentEl = document.querySelector('.result-content');
+    const primaryBtn = document.querySelector('.result-primary-action');
+    const secondaryEl = document.querySelector('.result-secondary-actions');
+
+    typeLabelEl.textContent = TYPE_LABELS[type] || 'TEXT';
+    contentEl.innerHTML = '';
+    secondaryEl.innerHTML = '';
+    primaryBtn.onclick = null;
+    primaryBtn.disabled = false;
+
+    if (type === 'url') {
+      contentEl.textContent = data; // full URL, always visible — never small print, never hidden under an ad
+      primaryBtn.textContent = 'Open Link';
+      primaryBtn.onclick = () => window.open(data, '_blank', 'noopener');
+      addSecondaryAction(secondaryEl, 'Copy Link', (e) => copyToClipboard(data, e.currentTarget));
+
+    } else if (type === 'wifi') {
+      contentEl.innerHTML =
+        `<div class="kv"><span>Network</span><strong>${escapeHtml(data.ssid || '(none found)')}</strong></div>` +
+        `<div class="kv"><span>Security</span><strong>${escapeHtml(data.security)}</strong></div>` +
+        `<div class="kv"><span>Password</span><strong id="wifi-pass">${data.password ? '••••••••' : '—'}</strong></div>` +
+        `<p class="hint">Open your phone's Wi-Fi settings and enter this manually — a webpage can't join a network for you.</p>`;
+      primaryBtn.textContent = data.password ? 'Copy Password' : 'No Password Needed';
+      primaryBtn.disabled = !data.password;
+      primaryBtn.onclick = (e) => copyToClipboard(data.password, e.currentTarget);
+      addSecondaryAction(secondaryEl, 'Copy Network Name', (e) => copyToClipboard(data.ssid, e.currentTarget));
+      if (data.password) {
+        addSecondaryAction(secondaryEl, 'Show Password', (e) => {
+          const el = document.getElementById('wifi-pass');
+          const showing = el.textContent !== '••••••••';
+          el.textContent = showing ? '••••••••' : data.password;
+          e.currentTarget.textContent = showing ? 'Show Password' : 'Hide Password';
+        });
+      }
+
+    } else if (type === 'contact') {
+      contentEl.innerHTML =
+        `<div class="kv"><span>Name</span><strong>${escapeHtml(data.name || '(no name found)')}</strong></div>` +
+        (data.phone ? `<div class="kv"><span>Phone</span><strong>${escapeHtml(data.phone)}</strong></div>` : '') +
+        (data.email ? `<div class="kv"><span>Email</span><strong>${escapeHtml(data.email)}</strong></div>` : '') +
+        (data.address ? `<div class="kv"><span>Address</span><strong>${escapeHtml(data.address)}</strong></div>` : '');
+      primaryBtn.textContent = 'Download Contact';
+      primaryBtn.onclick = () => downloadVCardFile(data);
+      if (data.phone) addSecondaryAction(secondaryEl, 'Call', () => { window.location.href = `tel:${data.phone}`; });
+      if (data.email) addSecondaryAction(secondaryEl, 'Email', () => { window.location.href = `mailto:${data.email}`; });
+
+    } else if (type === 'tel') {
+      contentEl.textContent = data;
+      primaryBtn.textContent = 'Call';
+      primaryBtn.onclick = () => { window.location.href = `tel:${data}`; };
+      addSecondaryAction(secondaryEl, 'Copy Number', (e) => copyToClipboard(data, e.currentTarget));
+
+    } else if (type === 'email') {
+      contentEl.textContent = data.address;
+      primaryBtn.textContent = 'Email';
+      primaryBtn.onclick = () => { window.location.href = raw; };
+      addSecondaryAction(secondaryEl, 'Copy Address', (e) => copyToClipboard(data.address, e.currentTarget));
+
+    } else if (type === 'sms') {
+      contentEl.innerHTML =
+        `<div class="kv"><span>To</span><strong>${escapeHtml(data.number)}</strong></div>` +
+        (data.body ? `<div class="kv"><span>Message</span><strong>${escapeHtml(data.body)}</strong></div>` : '');
+      primaryBtn.textContent = 'Text';
+      primaryBtn.onclick = () => { window.location.href = raw; };
+      addSecondaryAction(secondaryEl, 'Copy Number', (e) => copyToClipboard(data.number, e.currentTarget));
+
+    } else if (type === 'barcode') {
+      contentEl.textContent = data;
+      primaryBtn.textContent = 'Copy Barcode';
+      primaryBtn.onclick = (e) => copyToClipboard(data, e.currentTarget);
+
+    } else {
+      contentEl.textContent = data;
+      primaryBtn.textContent = 'Copy Text';
+      primaryBtn.onclick = (e) => copyToClipboard(data, e.currentTarget);
+    }
+
+    showView('result');
+  }
+
+  function processScan(rawText) {
+    if (!rawText || !String(rawText).trim()) return;
+    const parsed = parseScanPayload(rawText);
+    sessionScans.unshift({ ...parsed, scannedAt: Date.now() });
+    sessionScans = sessionScans.slice(0, 20);
+    renderResult(parsed);
+  }
+
+  function showCameraError(err) {
+    const banner = document.getElementById('camera-error-banner');
+    const raw = (err && err.message) ? String(err.message) : String(err || '');
+    let message;
+
+    if (raw === 'insecure-context') {
+      message = 'This page needs to be loaded over HTTPS for camera access to work. Use manual entry or the photo option below for now.';
+    } else if (raw === 'library-load-failed') {
+      message = "The scanning library didn't load — check your internet connection and reload the page. Manual entry and photo upload still work below.";
+    } else if (raw === 'unreadable-photo') {
+      message = "Couldn't find a code in that photo — try again with better lighting, or use manual entry below.";
+    } else if (/NotAllowedError|Permission/i.test(raw)) {
+      message = "Camera permission denied. On iPhone, once denied it won't ask again — re-enable it in Settings → Safari → Camera. Or use manual entry below.";
+    } else if (/NotFoundError|NotReadableError/i.test(raw)) {
+      message = 'No camera found, or another app is using it right now. Use manual entry or the photo option below.';
+    } else {
+      message = "Couldn't start the camera. Reload the page, or use manual entry below.";
+    }
+
+    banner.textContent = message;
+    banner.hidden = false;
+    document.getElementById('start-scan-btn').hidden = false;
+  }
+
+  function startScanner() {
+    document.getElementById('camera-error-banner').hidden = true;
+
+    if (!window.isSecureContext) {
+      showCameraError({ message: 'insecure-context' });
+      return;
+    }
+
+    if (typeof Html5Qrcode === 'undefined') {
+      showCameraError({ message: 'library-load-failed' });
+      return;
+    }
+
+    document.getElementById('start-scan-btn').hidden = true;
+    document.getElementById('qr-reader').innerHTML = '';
+
+    try {
+      scanner = new Html5Qrcode('qr-reader');
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText) => handleScanSuccess(decodedText),
+        () => { /* fires continuously while no code is in frame — expected, not an error */ }
+      ).catch((err) => showCameraError(err));
+    } catch (err) {
+      showCameraError(err);
+    }
+  }
+
+  async function stopScanner() {
+    if (scanner) {
+      try { await scanner.stop(); } catch (e) { /* already stopped, ignore */ }
+      scanner = null;
+    }
+  }
+
+  function handleScanSuccess(decodedText) {
+    const now = Date.now();
+    if (decodedText === lastScannedCode && (now - lastScanTime) < SCAN_COOLDOWN_MS) {
+      return; // same code still in frame, too soon — ignore
+    }
+    lastScannedCode = decodedText;
+    lastScanTime = now;
+
+    vibrateSuccess();
+    playSuccessTone();
+    stopScanner();
+    processScan(decodedText);
+  }
+
+  document.getElementById('start-scan-btn').addEventListener('click', startScanner);
+
+  document.getElementById('scan-again-btn').addEventListener('click', () => {
+    showView('scan');
+    document.getElementById('qr-reader').innerHTML = '<div class="viewfinder-placeholder"><span class="icon">▢</span><span>Tap "Start Scanning" below</span></div>';
+    document.getElementById('start-scan-btn').hidden = false;
+  });
+
+  document.getElementById('manual-lookup-btn').addEventListener('click', () => {
+    const input = document.getElementById('manual-code-input');
+    const value = input.value.trim();
+    if (!value) return;
+    input.value = '';
+    processScan(value);
+  });
+  document.getElementById('manual-code-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('manual-lookup-btn').click();
+  });
+
+  document.getElementById('file-scan-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (typeof Html5Qrcode === 'undefined') {
+      showCameraError({ message: 'library-load-failed' });
+      return;
+    }
+
+    await stopScanner();
+    let fileScanner;
+    try {
+      fileScanner = new Html5Qrcode('qr-reader-file-scratch');
+      const decodedText = await fileScanner.scanFile(file, false);
+      processScan(decodedText);
+    } catch (err) {
+      showCameraError({ message: 'unreadable-photo' });
+    } finally {
+      try { fileScanner.clear(); } catch (e2) { /* method may not exist on this build, harmless */ }
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && scanner) {
+      stopScanner();
+      document.getElementById('start-scan-btn').hidden = false;
+    }
+  });
+
+  window.addEventListener('DOMContentLoaded', () => {
+    if (!window.isSecureContext) {
+      showCameraError({ message: 'insecure-context' });
+    }
+  });
+</script>
+</body>
+</html>
